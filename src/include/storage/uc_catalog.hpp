@@ -12,6 +12,7 @@
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/common/enums/access_mode.hpp"
 #include "storage/uc_schema_set.hpp"
+#include "duckdb/main/attached_database.hpp"
 
 namespace duckdb {
 class UCSchemaEntry;
@@ -33,7 +34,7 @@ public:
 
 class UCCatalog : public Catalog {
 public:
-	explicit UCCatalog(AttachedDatabase &db_p, const string &internal_name, AccessMode access_mode,
+	explicit UCCatalog(AttachedDatabase &db_p, const string &internal_name, AttachOptions &attach_options,
 	                   UCCredentials credentials);
 	~UCCatalog();
 

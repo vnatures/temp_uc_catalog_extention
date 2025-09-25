@@ -1,5 +1,3 @@
-#define DUCKDB_EXTENSION_MAIN
-
 #include "uc_catalog_extension.hpp"
 #include "storage/uc_catalog.hpp"
 #include "storage/uc_transaction_manager.hpp"
@@ -9,7 +7,6 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
-#include "duckdb/main/extension_util.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/parser/parsed_data/attach_info.hpp"
 #include "duckdb/storage/storage_extension.hpp"
@@ -63,9 +60,9 @@ unique_ptr<SecretEntry> GetSecret(ClientContext &context, const string &secret_n
 	return nullptr;
 }
 
-static unique_ptr<Catalog> UCCatalogAttach(StorageExtensionInfo *storage_info, ClientContext &context,
+static unique_ptr<Catalog> UCCatalogAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
                                            AttachedDatabase &db, const string &name, AttachInfo &info,
-                                           AccessMode access_mode) {
+                                           AttachOptions &attach_options) {
 	UCCredentials credentials;
 
 	// check if we have a secret provided
@@ -112,10 +109,10 @@ static unique_ptr<Catalog> UCCatalogAttach(StorageExtensionInfo *storage_info, C
 		throw BinderException("Secret with name \"%s\" not found", secret_name);
 	}
 
-	return make_uniq<UCCatalog>(db, info.path, access_mode, credentials);
+	return make_uniq<UCCatalog>(db, info.path, attach_options, credentials);
 }
 
-static unique_ptr<TransactionManager> CreateTransactionManager(StorageExtensionInfo *storage_info, AttachedDatabase &db,
+static unique_ptr<TransactionManager> CreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info, AttachedDatabase &db,
                                                                Catalog &catalog) {
 	auto &uc_catalog = catalog.Cast<UCCatalog>();
 	return make_uniq<UCTransactionManager>(db, uc_catalog);
@@ -129,7 +126,7 @@ public:
 	}
 };
 
-static void LoadInternal(DatabaseInstance &instance) {
+static void LoadInternal(ExtensionLoader &loader) {
 	UCAPI::InitializeCurl();
 
 	SecretType secret_type;
@@ -137,45 +134,30 @@ static void LoadInternal(DatabaseInstance &instance) {
 	secret_type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
 	secret_type.default_provider = "config";
 
-	ExtensionUtil::RegisterSecretType(instance, secret_type);
+
+	loader.RegisterSecretType(secret_type);
 
 	CreateSecretFunction mysql_secret_function = {"uc", "config", CreateUCSecretFunction};
 	SetUCSecretParameters(mysql_secret_function);
-	ExtensionUtil::RegisterFunction(instance, mysql_secret_function);
+	loader.RegisterFunction(mysql_secret_function);
 
-	auto &config = DBConfig::GetConfig(instance);
+	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
 	config.storage_extensions["uc_catalog"] = make_uniq<UCCatalogStorageExtension>();
 }
 
-void UcCatalogExtension::Load(DuckDB &db) {
-	LoadInternal(*db.instance);
+void UcCatalogExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader);
 }
 std::string UcCatalogExtension::Name() {
 	return "uc_catalog";
-}
-
-std::string UcCatalogExtension::Version() const {
-#ifdef EXT_VERSION_UC_CATALOG
-	return EXT_VERSION_UC_CATALOG;
-#else
-	return "";
-#endif
 }
 
 } // namespace duckdb
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void uc_catalog_init(duckdb::DatabaseInstance &db) {
-	duckdb::DuckDB db_wrapper(db);
-	db_wrapper.LoadExtension<duckdb::UcCatalogExtension>();
+DUCKDB_CPP_EXTENSION_ENTRY(uc_catalog, loader) {
+	duckdb::LoadInternal(loader);
 }
 
-DUCKDB_EXTENSION_API const char *uc_catalog_version() {
-	return duckdb::DuckDB::LibraryVersion();
 }
-}
-
-#ifndef DUCKDB_EXTENSION_MAIN
-#error DUCKDB_EXTENSION_MAIN not defined
-#endif

@@ -6,9 +6,8 @@ namespace duckdb {
 
 class UcCatalogExtension : public Extension {
 public:
-	void Load(DuckDB &db) override;
+	void Load(ExtensionLoader &load) override;
 	std::string Name() override;
-	std::string Version() const override;
 };
 
 } // namespace duckdb

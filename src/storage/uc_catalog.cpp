@@ -8,9 +8,9 @@
 
 namespace duckdb {
 
-UCCatalog::UCCatalog(AttachedDatabase &db_p, const string &internal_name, AccessMode access_mode,
+UCCatalog::UCCatalog(AttachedDatabase &db_p, const string &internal_name, AttachOptions &attach_options,
                      UCCredentials credentials)
-    : Catalog(db_p), internal_name(internal_name), access_mode(access_mode), credentials(std::move(credentials)),
+    : Catalog(db_p), internal_name(internal_name), access_mode(attach_options.access_mode), credentials(std::move(credentials)),
       schemas(*this) {
 }
 

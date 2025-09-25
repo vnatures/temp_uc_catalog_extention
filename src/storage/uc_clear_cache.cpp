@@ -23,8 +23,8 @@ static unique_ptr<FunctionData> ClearCacheBind(ClientContext &context, TableFunc
 static void ClearUCCaches(ClientContext &context) {
 	auto databases = DatabaseManager::Get(context).GetDatabases(context);
 	for (auto &db_ref : databases) {
-		auto &db = db_ref.get();
-		auto &catalog = db.GetCatalog();
+		auto db = db_ref.get();
+		auto &catalog = db->GetCatalog();
 		if (catalog.GetCatalogType() != "uc") {
 			continue;
 		}
