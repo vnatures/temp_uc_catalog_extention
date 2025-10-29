@@ -35,7 +35,7 @@ public:
 class UCCatalog : public Catalog {
 public:
 	explicit UCCatalog(AttachedDatabase &db_p, const string &internal_name, AttachOptions &attach_options,
-	                   UCCredentials credentials);
+	                   UCCredentials credentials, const string &default_schema);
 	~UCCatalog();
 
 	string internal_name;
@@ -70,6 +70,7 @@ public:
 	                                            unique_ptr<LogicalOperator> plan) override;
 
 	DatabaseSize GetDatabaseSize(ClientContext &context) override;
+	string GetDefaultSchema() const override;
 
 	//! Whether or not this is an in-memory UC database
 	bool InMemory() override;

@@ -109,6 +109,40 @@ static string TryGetStrFromObject(duckdb_yyjson::yyjson_val *obj, const string &
 	                                                                                           fail_on_missing);
 }
 
+namespace {
+
+struct UCAPIError {
+public:
+	UCAPIError() {}
+	UCAPIError(const string &error_code, const string &message) : error_code(error_code), message(message) {}
+public:
+	bool HasError() {
+		return !error_code.empty();
+	}
+public:
+	void ThrowError(const string &prefix) {
+		D_ASSERT(HasError());
+		throw InvalidInputException("%s. error_code: %s, message: %s", prefix, error_code, message);
+	}
+private:
+	string error_code;
+	string message;
+};
+
+} // namespace
+
+static UCAPIError CheckError(duckdb_yyjson::yyjson_val *api_result) {
+	auto error_code = TryGetStrFromObject(api_result, "error_code", false);
+	if (!error_code.empty()) {
+		auto message = TryGetStrFromObject(api_result, "message", false);
+		if (message.empty()) {
+			message = "-";
+		}
+		return UCAPIError(error_code, message);
+	}
+	return UCAPIError();
+}
+
 static string GetCredentialsRequest(const string &url, const string &table_id, const string &token = "") {
 	CURL *curl;
 	CURLcode res;
@@ -164,7 +198,57 @@ void UCAPI::InitializeCurl() {
 //    "https://${DATABRICKS_HOST}/api/2.1/unity-catalog/tables?catalog_name=workspace&schema_name=default" \
 // 	--header "Authorization: Bearer ${TOKEN}" | jq .
 
-UCAPITableCredentials UCAPI::GetTableCredentials(const string &table_id, UCCredentials credentials) {
+static string GetDefaultSchemaRequest(const UCCredentials &credentials) {
+	CURL *curl;
+	CURLcode res;
+	string readBuffer;
+
+	curl = curl_easy_init();
+	if (!curl) {
+		throw InternalException("Failed to initialize curl");
+	}
+	auto url = credentials.endpoint + "/api/2.0/settings/types/default_namespace_ws/names/default";
+	curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, GetRequestWriteCallback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+
+	// Set headers
+	struct curl_slist *headers = curl_slist_append(nullptr, "Content-Type: application/json");
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+	InitializeCurlObject(curl, credentials.token);
+
+	res = curl_easy_perform(curl);
+	curl_easy_cleanup(curl);
+
+	if (res != CURLcode::CURLE_OK) {
+		string error = curl_easy_strerror(res);
+		throw IOException("Curl Request to '%s' failed with error: '%s'\n'%s'", url, error, readBuffer);
+	}
+	return readBuffer;
+}
+
+string UCAPI::GetDefaultSchema(const UCCredentials &credentials) {
+	auto api_result = GetDefaultSchemaRequest(credentials);
+
+	// Read JSON and get root
+	duckdb_yyjson::yyjson_doc *doc = duckdb_yyjson::yyjson_read(api_result.c_str(), api_result.size(), 0);
+	duckdb_yyjson::yyjson_val *root = yyjson_doc_get_root(doc);
+
+	auto error = CheckError(root);
+	if (error.HasError()) {
+		error.ThrowError("Failed to get default schema of the catalog");
+	}
+
+	auto setting_name = TryGetStrFromObject(root, "setting_name");
+	if (setting_name.empty()) {
+		throw InvalidInputException("Failed to get default schema of the catalog, API response is invalid!");
+	}
+
+	return setting_name;
+}
+
+UCAPITableCredentials UCAPI::GetTableCredentials(const string &table_id, const UCCredentials &credentials) {
 	UCAPITableCredentials result;
 
 	auto api_result = GetCredentialsRequest(credentials.endpoint + "/api/2.1/unity-catalog/temporary-table-credentials",
@@ -174,13 +258,9 @@ UCAPITableCredentials UCAPI::GetTableCredentials(const string &table_id, UCCrede
 	duckdb_yyjson::yyjson_doc *doc = duckdb_yyjson::yyjson_read(api_result.c_str(), api_result.size(), 0);
 	duckdb_yyjson::yyjson_val *root = yyjson_doc_get_root(doc);
 
-	auto error_code = TryGetStrFromObject(root, "error_code", false);
-	if (!error_code.empty()) {
-		auto message = TryGetStrFromObject(root, "message", false);
-		if (message.empty()) {
-			message = "-";
-		}
-		throw InvalidInputException("Failed to get table credentials for table_id: %s, error_code: %s, message: %s", table_id, error_code, message);
+	auto error = CheckError(root);
+	if (error.HasError()) {
+		error.ThrowError(StringUtil::Format("Failed to get table credentials for table_id: %s", table_id));
 	}
 
 	auto *aws_temp_credentials = yyjson_obj_get(root, "aws_temp_credentials");
@@ -193,7 +273,7 @@ UCAPITableCredentials UCAPI::GetTableCredentials(const string &table_id, UCCrede
 	return result;
 }
 
-vector<string> UCAPI::GetCatalogs(const string &catalog, UCCredentials credentials) {
+vector<string> UCAPI::GetCatalogs(const string &catalog, const UCCredentials &credentials) {
 	throw NotImplementedException("UCAPI::GetCatalogs");
 }
 
@@ -209,7 +289,7 @@ static UCAPIColumnDefinition ParseColumnDefinition(duckdb_yyjson::yyjson_val *co
 	return result;
 }
 
-vector<UCAPITable> UCAPI::GetTables(const string &catalog, const string &schema, UCCredentials credentials) {
+vector<UCAPITable> UCAPI::GetTables(const string &catalog, const string &schema, const UCCredentials &credentials) {
 	vector<UCAPITable> result;
 	auto api_result = GetRequest(credentials.endpoint + "/api/2.1/unity-catalog/tables?catalog_name=" + catalog +
 	                                 "&schema_name=" + schema,
@@ -248,7 +328,7 @@ vector<UCAPITable> UCAPI::GetTables(const string &catalog, const string &schema,
 	return result;
 }
 
-vector<UCAPISchema> UCAPI::GetSchemas(const string &catalog, UCCredentials credentials) {
+vector<UCAPISchema> UCAPI::GetSchemas(const string &catalog, const UCCredentials &credentials) {
 	vector<UCAPISchema> result;
 
 	auto api_result =

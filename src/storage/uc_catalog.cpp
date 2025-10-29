@@ -12,9 +12,9 @@
 namespace duckdb {
 
 UCCatalog::UCCatalog(AttachedDatabase &db_p, const string &internal_name, AttachOptions &attach_options,
-                     UCCredentials credentials)
+                     UCCredentials credentials, const string &default_schema)
     : Catalog(db_p), internal_name(internal_name), access_mode(attach_options.access_mode), credentials(std::move(credentials)),
-      schemas(*this) {
+      schemas(*this), default_schema(default_schema) {
 }
 
 UCCatalog::~UCCatalog() = default;
@@ -46,7 +46,10 @@ optional_ptr<SchemaCatalogEntry> UCCatalog::LookupSchema(CatalogTransaction tran
 									 const EntryLookupInfo &schema_lookup,
 									 OnEntryNotFound if_not_found) {
 	if (schema_lookup.GetEntryName() == DEFAULT_SCHEMA) {
-		//! FIXME: the default schema of the catalog should be looked up through the '/api/2.0/settings/types/default_namespace_ws/names/default' endpoint
+		if (default_schema.empty()) {
+			throw InvalidInputException("Attempting to fetch the default schema - but no database was provided by the catalog");
+		}
+		return GetSchema(transaction, default_schema, if_not_found);
 	}
 	auto entry = schemas.GetEntry(transaction.GetContext(), schema_lookup.GetEntryName());
 	if (!entry && if_not_found != OnEntryNotFound::RETURN_NULL) {
@@ -61,6 +64,10 @@ bool UCCatalog::InMemory() {
 
 string UCCatalog::GetDBPath() {
 	return internal_name;
+}
+
+string UCCatalog::GetDefaultSchema() const {
+	return default_schema;
 }
 
 DatabaseSize UCCatalog::GetDatabaseSize(ClientContext &context) {
