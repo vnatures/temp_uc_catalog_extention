@@ -8,7 +8,7 @@ EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 #DEFAULT_TEST_EXTENSION_DEPS=parquet;httpfs;delta
 
 DEFAULT_TEST_EXTENSION_DEPS=parquet;httpfs
-FULL_TEST_EXTENSION_DEPS=tpcds;tpch
+#FULL_TEST_EXTENSION_DEPS=tpcds;tpch TODO: add
 
 # Include the Makefile from extension-ci-tools
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
