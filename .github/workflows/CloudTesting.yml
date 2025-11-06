@@ -1,0 +1,72 @@
+name: Cloud functional tests
+on: [push, repository_dispatch]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}-${{ github.ref != 'refs/heads/main' || github.sha }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  databricks-tests-linux:
+    name: Azure tests (Linux)
+    runs-on: ubuntu-latest
+    env:
+      VCPKG_TARGET_TRIPLET: x64-linux
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      GEN: Ninja
+      DUCKDB_PLATFORM: linux_amd64
+      BUILD_EXTENSION_TEST_DEPS: full
+
+    steps:
+      - name: Install required ubuntu packages
+        run: |
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq software-properties-common
+          sudo add-apt-repository ppa:git-core/ppa
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq ninja-build make gcc-multilib g++-multilib zip unzip build-essential checkinstall curl libz-dev openssh-client
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'true'
+
+      - name: Setup Ccache
+        uses: hendrikmuhs/ccache-action@v1.2.11 # Note: pinned due to GLIBC incompatibility in later releases
+        with:
+          key: ${{ github.job }}-${{ matrix.duckdb_arch }}
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11.1
+        with:
+          vcpkgGitCommitId: ce613c41372b23b1f51333815feb3edd87ef8a8b
+
+      - name: Configure OpenSSL for Rust
+        run: |
+          echo "OPENSSL_ROOT_DIR=`pwd`/build/release/vcpkg_installed/x64-linux" >> $GITHUB_ENV
+          echo "OPENSSL_DIR=`pwd`/build/release/vcpkg_installed/x64-linux" >> $GITHUB_ENV
+          echo "OPENSSL_USE_STATIC_LIBS=true" >> $GITHUB_ENV
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build extension
+        env:
+          GEN: ninja
+        run: |
+          make reldebug
+
+      - name: Setup credentials
+        uses: 1password/load-secrets-action@v3
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          DATABRICKS_TOKEN: 'op://testing/databricks_free/token'
+          DATABRICKS_ENDPOINT: 'op://testing/databricks_free/endpoint'
+          DATABRICKS_REGION: 'op://testing/databricks_free/aws_region'
+
+      - name: Test with databricks free credentials
+        run: |
+          make test_reldebug
