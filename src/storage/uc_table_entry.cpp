@@ -9,7 +9,6 @@
 #include "duckdb/parser/tableref/table_function_ref.hpp"
 #include "uc_api.hpp"
 #include "uc_utils.hpp"
-#include "../../duckdb/third_party/catch/catch.hpp"
 
 namespace duckdb {
 
